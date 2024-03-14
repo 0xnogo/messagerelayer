@@ -13,29 +13,30 @@ import (
 	mockSocket "github.com/0xnogo/messagerelayer/socket/mocks"
 	mockSubcriber "github.com/0xnogo/messagerelayer/subscriber/mocks"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
-
-// TODO:
-// [] scenario builder for the tests or factorize (sub creation, message creation) better
-// [] Create a chaos test (add a test which send multiple messages with random times (blocker: waiting logic))
 
 type RelayerTestSuite struct {
 	suite.Suite
 	mockSocket *mockSocket.MockNetworkSocket
 	relayer    *relayer.MessageRelayer
+	skipStop   bool
 }
 
 func (rts *RelayerTestSuite) SetupTest() {
 	rts.mockSocket = new(mockSocket.MockNetworkSocket)
 	rts.relayer = relayer.NewMessageRelayer(rts.mockSocket)
+	rts.skipStop = false
 }
 
-func (rts *RelayerTestSuite) AfterTest() {
-	rts.relayer.Stop()
+func (rts *RelayerTestSuite) TearDownTest() {
+	if !rts.skipStop {
+		rts.relayer.Stop()
+	}
 }
 
-func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsCorrectMessagesWithStartNewRound() {
+func (rts *RelayerTestSuite) TestBroadcastStartNewRound() {
 	// GIVEN
 	rts.mockSocket.On("Read").
 		Return(message.NewMessage(message.StartNewRound, []byte("Round 1")), nil).After(100 * time.Millisecond).Once()
@@ -60,7 +61,7 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsCorrectMessagesWithSta
 	assert.Equal(rts.T(), 0, len(sub.ReceivedAnswerMsgs))
 }
 
-func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsCorrectMessagesWithReceiveAnswer() {
+func (rts *RelayerTestSuite) TestBroadcastReceivedAnswer() {
 	// GIVEN
 	rts.mockSocket.On("Read").
 		Return(message.NewMessage(message.ReceivedAnswer, []byte("Answer 1")), nil).After(100 * time.Millisecond).Once()
@@ -85,7 +86,7 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsCorrectMessagesWithRec
 	assert.Equal(rts.T(), 0, len(sub.StartNewRoundMsgs))
 }
 
-func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsMessageWithSubscriberInterestedIntoBothTypes() {
+func (rts *RelayerTestSuite) TestBroadcastToMultiInterestSubscriber() {
 	// GIVEN
 	rts.mockSocket.On("Read").
 		Return(message.NewMessage(message.ReceivedAnswer, []byte("Answer 1")), nil).After(100 * time.Millisecond).Once()
@@ -110,7 +111,7 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsMessageWithSubscriberI
 	assert.Equal(rts.T(), 1, len(sub.StartNewRoundMsgs))
 }
 
-func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsMessageWithPreservedOrder() {
+func (rts *RelayerTestSuite) TestPreserveMessageOrder() {
 	// GIVEN
 	rts.mockSocket.On("Read").
 		Return(message.NewMessage(message.ReceivedAnswer, []byte("Answer 1")), nil).Once()
@@ -151,7 +152,7 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsMessageWithPreservedOr
 	}
 }
 
-func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsCorrectMessagesWithRandomTypesAndMultipleSubscribers() {
+func (rts *RelayerTestSuite) TestBroadcastRandomToMultipleSubs() {
 	// GIVEN
 	expectedResult := randomizeMessages(10, rts.mockSocket)
 
@@ -187,7 +188,7 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsCorrectMessagesWithRan
 	}
 }
 
-func (rts *RelayerTestSuite) TestMessageRelayer_SubscribeToMessagesAfterStartSendsBufferedMessagesAndTheFollowingMessages() {
+func (rts *RelayerTestSuite) TestLateSubscribeGetsBufferedAndNew() {
 	// GIVEN
 	rts.mockSocket.On("Read").
 		Return(message.NewMessage(message.StartNewRound, []byte("Start 1")), nil).After(50 * time.Millisecond).Once()
@@ -222,7 +223,7 @@ func (rts *RelayerTestSuite) TestMessageRelayer_SubscribeToMessagesAfterStartSen
 	assert.Equal(rts.T(), 3, len(subAfter.StartNewRoundMsgs))
 }
 
-func (rts *RelayerTestSuite) TestMessageRelayer_OnlyLastTwoStartNewRoundAndLastReceivedAnswerShouldBeBroadcastedToNewSub() {
+func (rts *RelayerTestSuite) TestNewSubGetsRecentMessages() {
 	// GIVEN
 	rts.mockSocket.On("Read").
 		Return(message.NewMessage(message.StartNewRound, []byte("Start 1")), nil).Once()
@@ -270,7 +271,7 @@ func (rts *RelayerTestSuite) TestMessageRelayer_OnlyLastTwoStartNewRoundAndLastR
 	assert.Equal(rts.T(), "Answer 2", string(subAfter.ReceivedAnswerMsgs[0].Data))
 }
 
-func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsMessagesWithBusySubscriber() {
+func (rts *RelayerTestSuite) TestBroadcastWithBusySubscriber() {
 	// GIVEN
 	rts.mockSocket.On("Read").
 		Return(message.NewMessage(message.StartNewRound, []byte("Start 1")), nil).Once()
@@ -299,6 +300,34 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsMessagesWithBusySubscr
 	wg.Wait()
 	assert.Equal(rts.T(), 3, len(fastSub.StartNewRoundMsgs))
 	assert.Equal(rts.T(), 2, len(slowSub.StartNewRoundMsgs)) // instead of 3 - "Start 2" is not received
+}
+
+func (rts *RelayerTestSuite) TestStopShutdownWithoutPanicWhileMessageAreSent() {
+	rts.skipStop = true
+
+	// GIVEN
+	ch := make(chan message.Message, 100000)
+	rts.relayer.SubscribeToMessages(message.StartNewRound, ch)
+	rts.mockSocket.On("Read").
+		Return(message.NewMessage(message.StartNewRound, []byte("Start")), nil)
+
+	rts.relayer.Start()
+
+	go func() {
+		for {
+			<-ch
+		}
+	}()
+
+	// Allow some operations to potentially start or messages to be queued
+	time.Sleep(100 * time.Millisecond)
+
+	// WHEN
+	rts.relayer.Stop()
+
+	// THEN
+	_, ok := <-ch
+	require.False(rts.T(), ok, "Subscriber channel should be closed")
 }
 
 func TestRelayerTestSuite(t *testing.T) {

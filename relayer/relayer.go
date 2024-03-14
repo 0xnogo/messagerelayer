@@ -17,6 +17,7 @@ type MessageRelayer struct {
 	buffer          *buffer.RelayBuffer
 	messageReceived chan message.Message
 	stopChannel     chan struct{}
+	wg              sync.WaitGroup
 }
 
 func NewMessageRelayer(socket socket.NetworkSocket) *MessageRelayer {
@@ -40,15 +41,21 @@ func (mr *MessageRelayer) SubscribeToMessages(msgType message.MessageType, ch ch
 }
 
 func (mr *MessageRelayer) Start() {
+	mr.wg.Add(2)
+
 	go mr.readFromSocket()
 	go mr.processMessage()
 }
 
 func (mr *MessageRelayer) Stop() {
+	fmt.Println("Shutting down gracefully the relayer...")
 	mr.mux.Lock()
 	defer mr.mux.Unlock()
-
 	close(mr.stopChannel)
+
+	// Wait for the read and process goroutines to finish
+	mr.wg.Wait()
+
 	close(mr.messageReceived)
 	for _, sub := range mr.subscribers {
 		close(sub.Ch)
@@ -57,6 +64,7 @@ func (mr *MessageRelayer) Stop() {
 
 // Read from the socket and send the message to the processing channel.
 func (mr *MessageRelayer) readFromSocket() {
+	defer mr.wg.Done()
 	for {
 		select {
 		case <-mr.stopChannel:
@@ -64,17 +72,26 @@ func (mr *MessageRelayer) readFromSocket() {
 		default:
 			msg, err := mr.socket.Read()
 			if err != nil {
-				// handle error (log)
+				fmt.Println("Error reading from socket:", err)
 				continue
 			}
 
-			mr.messageReceived <- msg
+			// Use of select to achieve a graceful shutdown
+			// If the messageReceived channel is full, it will block until it's empty
+			// or until the relayer is stopped
+			select {
+			case mr.messageReceived <- msg:
+			case <-mr.stopChannel:
+				return
+			}
+
 		}
 	}
 }
 
 // Process each incoming message and update the appropriate buffers.
 func (mr *MessageRelayer) processMessage() {
+	defer mr.wg.Done()
 	for {
 		select {
 		case <-mr.stopChannel:
