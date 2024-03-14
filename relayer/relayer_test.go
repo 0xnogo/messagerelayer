@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,7 +17,6 @@ import (
 )
 
 // TODO:
-// [] improve the waiting logic (wg?)
 // [] scenario builder for the tests or factorize (sub creation, message creation) better
 // [] Create a chaos test (add a test which send multiple messages with random times (blocker: waiting logic))
 
@@ -43,8 +43,11 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsCorrectMessagesWithSta
 		Return(message.NewMessage(message.StartNewRound, []byte("Round 2")), nil).After(100 * time.Millisecond).Once()
 	rts.mockSocket.On("Read").Return(message.Message{}, errors.New("EOF"))
 
+	var wg sync.WaitGroup
+	wg.Add(2) // total number of messages expected
+
 	// Create subscribers for the relayer.
-	sub := mockSubcriber.NewMockSubscriber("1", message.StartNewRound, 0, 0)
+	sub := mockSubcriber.NewMockSubscriber("1", message.StartNewRound, 0, 0, &wg)
 	sub.StartListening()
 	rts.relayer.SubscribeToMessages(sub.MsgType, sub.Ch)
 
@@ -52,7 +55,7 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsCorrectMessagesWithSta
 	rts.relayer.Start()
 
 	// THEN
-	time.Sleep(1 * time.Second)
+	wg.Wait()
 	assert.Equal(rts.T(), 2, len(sub.StartNewRoundMsgs))
 	assert.Equal(rts.T(), 0, len(sub.ReceivedAnswerMsgs))
 }
@@ -65,8 +68,11 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsCorrectMessagesWithRec
 		Return(message.NewMessage(message.ReceivedAnswer, []byte("Answer 2")), nil).After(100 * time.Millisecond).Once()
 	rts.mockSocket.On("Read").Return(message.Message{}, errors.New("EOF"))
 
+	var wg sync.WaitGroup
+	wg.Add(2) // total number of messages expected
+
 	// Create subscribers for the relayer.
-	sub := mockSubcriber.NewMockSubscriber("1", message.ReceivedAnswer, 0, 0)
+	sub := mockSubcriber.NewMockSubscriber("1", message.ReceivedAnswer, 0, 0, &wg)
 	sub.StartListening()
 	rts.relayer.SubscribeToMessages(sub.MsgType, sub.Ch)
 
@@ -74,7 +80,7 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsCorrectMessagesWithRec
 	rts.relayer.Start()
 
 	// THEN
-	time.Sleep(1 * time.Second)
+	wg.Wait()
 	assert.Equal(rts.T(), 2, len(sub.ReceivedAnswerMsgs))
 	assert.Equal(rts.T(), 0, len(sub.StartNewRoundMsgs))
 }
@@ -87,8 +93,11 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsMessageWithSubscriberI
 		Return(message.NewMessage(message.StartNewRound, []byte("Round 1")), nil).After(100 * time.Millisecond).Once()
 	rts.mockSocket.On("Read").Return(message.Message{}, errors.New("EOF"))
 
+	var wg sync.WaitGroup
+	wg.Add(2) // total number of messages expected
+
 	// Create subscribers for the relayer.
-	sub := mockSubcriber.NewMockSubscriber("1", message.StartNewRound|message.ReceivedAnswer, 0, 0) // Interested in StartNewRound messages.
+	sub := mockSubcriber.NewMockSubscriber("1", message.StartNewRound|message.ReceivedAnswer, 0, 0, &wg)
 	sub.StartListening()
 	rts.relayer.SubscribeToMessages(sub.MsgType, sub.Ch)
 
@@ -96,7 +105,7 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsMessageWithSubscriberI
 	rts.relayer.Start()
 
 	// THEN
-	time.Sleep(1 * time.Second)
+	wg.Wait()
 	assert.Equal(rts.T(), 1, len(sub.ReceivedAnswerMsgs))
 	assert.Equal(rts.T(), 1, len(sub.StartNewRoundMsgs))
 }
@@ -113,8 +122,11 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsMessageWithPreservedOr
 		Return(message.NewMessage(message.StartNewRound, []byte("Round 2")), nil).After(30 * time.Millisecond).Once()
 	rts.mockSocket.On("Read").Return(message.Message{}, errors.New("EOF"))
 
+	var wg sync.WaitGroup
+	wg.Add(4) // total number of messages expected
+
 	// Create subscribers for the relayer.
-	sub := mockSubcriber.NewMockSubscriber("1", message.StartNewRound|message.ReceivedAnswer, 0, 0) // Interested in StartNewRound messages.
+	sub := mockSubcriber.NewMockSubscriber("1", message.StartNewRound|message.ReceivedAnswer, 0, 0, &wg)
 	sub.StartListening()
 
 	rts.relayer.SubscribeToMessages(sub.MsgType, sub.Ch)
@@ -123,7 +135,7 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsMessageWithPreservedOr
 	rts.relayer.Start()
 
 	// THEN
-	time.Sleep(1 * time.Second)
+	wg.Wait()
 	assert.Equal(rts.T(), 2, len(sub.ReceivedAnswerMsgs))
 	assert.Equal(rts.T(), 2, len(sub.StartNewRoundMsgs))
 
@@ -143,12 +155,16 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsCorrectMessagesWithRan
 	// GIVEN
 	expectedResult := randomizeMessages(10, rts.mockSocket)
 
+	var wg sync.WaitGroup
+	rts.T().Log(len(expectedResult[message.StartNewRound])*2 + len(expectedResult[message.ReceivedAnswer])*2)
+	wg.Add(len(expectedResult[message.StartNewRound])*2 + len(expectedResult[message.ReceivedAnswer])*2) // total number of messages expected
+
 	// Create subscribers for the relayer
-	sub1 := mockSubcriber.NewMockSubscriber("1", message.StartNewRound, 0, 0) // Interested in StartNewRound messages.
+	sub1 := mockSubcriber.NewMockSubscriber("1", message.StartNewRound, 0, 0, &wg)
 	sub1.StartListening()
-	sub2 := mockSubcriber.NewMockSubscriber("1", message.ReceivedAnswer, 0, 0) // Interested in StartNewRound messages.
+	sub2 := mockSubcriber.NewMockSubscriber("1", message.ReceivedAnswer, 0, 0, &wg)
 	sub2.StartListening()
-	sub3 := mockSubcriber.NewMockSubscriber("1", message.StartNewRound|message.ReceivedAnswer, 0, 0) // Interested in StartNewRound messages.
+	sub3 := mockSubcriber.NewMockSubscriber("1", message.StartNewRound|message.ReceivedAnswer, 0, 0, &wg)
 	sub3.StartListening()
 	subs := []*mockSubcriber.MockSubscriber{sub1, sub2, sub3}
 
@@ -160,7 +176,7 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsCorrectMessagesWithRan
 	rts.relayer.Start()
 
 	// THEN
-	time.Sleep(1 * time.Second)
+	wg.Wait()
 	for _, sub := range subs {
 		if sub.IsInterestedIn(message.StartNewRound) {
 			assert.Equal(rts.T(), len(expectedResult[message.StartNewRound]), len(sub.StartNewRoundMsgs))
@@ -181,8 +197,11 @@ func (rts *RelayerTestSuite) TestMessageRelayer_SubscribeToMessagesAfterStartSen
 		Return(message.NewMessage(message.StartNewRound, []byte("Start 3")), nil).After(500 * time.Millisecond).Once()
 	rts.mockSocket.On("Read").Return(message.Message{}, errors.New("EOF"))
 
-	subBefore := mockSubcriber.NewMockSubscriber("Before", message.StartNewRound, 0, 0)
-	subAfter := mockSubcriber.NewMockSubscriber("After", message.StartNewRound, 0, 2) // need a buffer of 2 to receive the first 2 messages
+	var wg sync.WaitGroup
+	wg.Add(6) // total number of messages expected
+
+	subBefore := mockSubcriber.NewMockSubscriber("Before", message.StartNewRound, 0, 0, &wg)
+	subAfter := mockSubcriber.NewMockSubscriber("After", message.StartNewRound, 0, 2, &wg) // need a buffer of 2 to receive the first 2 messages
 	subBefore.StartListening()
 	subAfter.StartListening()
 
@@ -198,7 +217,7 @@ func (rts *RelayerTestSuite) TestMessageRelayer_SubscribeToMessagesAfterStartSen
 	rts.relayer.Start()
 
 	// THEN
-	time.Sleep(1 * time.Second)
+	wg.Wait()
 	assert.Equal(rts.T(), 3, len(subBefore.StartNewRoundMsgs))
 	assert.Equal(rts.T(), 3, len(subAfter.StartNewRoundMsgs))
 }
@@ -217,8 +236,11 @@ func (rts *RelayerTestSuite) TestMessageRelayer_OnlyLastTwoStartNewRoundAndLastR
 		Return(message.NewMessage(message.ReceivedAnswer, []byte("Answer 2")), nil).After(200 * time.Millisecond).Once()
 	rts.mockSocket.On("Read").Return(message.Message{}, errors.New("EOF"))
 
-	subBefore := mockSubcriber.NewMockSubscriber("Before", message.StartNewRound|message.ReceivedAnswer, 0, 0)
-	subAfter := mockSubcriber.NewMockSubscriber("After", message.StartNewRound|message.ReceivedAnswer, 0, 2) // need a buffer of 2 to receive the first 2 messages
+	var wg sync.WaitGroup
+	wg.Add(8) // total number of messages expected
+
+	subBefore := mockSubcriber.NewMockSubscriber("Before", message.StartNewRound|message.ReceivedAnswer, 0, 0, &wg)
+	subAfter := mockSubcriber.NewMockSubscriber("After", message.StartNewRound|message.ReceivedAnswer, 0, 2, &wg) // need a buffer of 2 to receive the first 2 messages
 	subBefore.StartListening()
 	subAfter.StartListening()
 
@@ -226,7 +248,7 @@ func (rts *RelayerTestSuite) TestMessageRelayer_OnlyLastTwoStartNewRoundAndLastR
 	rts.relayer.SubscribeToMessages(subBefore.MsgType, subBefore.Ch)
 
 	// delay the subscription to ensure that the buffered messages are sent
-	time.AfterFunc(700*time.Millisecond, func() {
+	time.AfterFunc(800*time.Millisecond, func() {
 		rts.relayer.SubscribeToMessages(subAfter.MsgType, subAfter.Ch)
 	})
 
@@ -234,7 +256,7 @@ func (rts *RelayerTestSuite) TestMessageRelayer_OnlyLastTwoStartNewRoundAndLastR
 	rts.relayer.Start()
 
 	// THEN
-	time.Sleep(1 * time.Second)
+	wg.Wait()
 
 	assert.Equal(rts.T(), 3, len(subBefore.StartNewRoundMsgs))
 	assert.Equal(rts.T(), 2, len(subAfter.StartNewRoundMsgs)) // instead of 3
@@ -258,8 +280,11 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsMessagesWithBusySubscr
 		Return(message.NewMessage(message.StartNewRound, []byte("Start 3")), nil).After(200 * time.Millisecond).Once()
 	rts.mockSocket.On("Read").Return(message.Message{}, errors.New("EOF"))
 
-	slowSub := mockSubcriber.NewMockSubscriber("Slow", message.StartNewRound, 100*time.Millisecond, 0)
-	fastSub := mockSubcriber.NewMockSubscriber("Fast", message.StartNewRound, 0, 0)
+	var wg sync.WaitGroup
+	wg.Add(5) // total number of messages expected
+
+	slowSub := mockSubcriber.NewMockSubscriber("Slow", message.StartNewRound, 100*time.Millisecond, 0, &wg)
+	fastSub := mockSubcriber.NewMockSubscriber("Fast", message.StartNewRound, 0, 0, &wg)
 
 	slowSub.StartListening()
 	fastSub.StartListening()
@@ -271,7 +296,7 @@ func (rts *RelayerTestSuite) TestMessageRelayer_BroadcastsMessagesWithBusySubscr
 	rts.relayer.Start()
 
 	// THEN
-	time.Sleep(1 * time.Second)
+	wg.Wait()
 	assert.Equal(rts.T(), 3, len(fastSub.StartNewRoundMsgs))
 	assert.Equal(rts.T(), 2, len(slowSub.StartNewRoundMsgs)) // instead of 3 - "Start 2" is not received
 }

@@ -18,10 +18,11 @@ type MockSubscriber struct {
 	ReceivedAnswerMsgs []message.Message
 	Delay              time.Duration // Processing delay to simulate business logic
 	mux                sync.Mutex
+	wg                 *sync.WaitGroup
 }
 
 // NewMockSubscriber creates a new instance of MockSubscriber.
-func NewMockSubscriber(name string, msgType message.MessageType, delay time.Duration, bufferSize uint8) *MockSubscriber {
+func NewMockSubscriber(name string, msgType message.MessageType, delay time.Duration, bufferSize uint8, wg *sync.WaitGroup) *MockSubscriber {
 	return &MockSubscriber{
 		Name:               name,
 		MsgType:            msgType,
@@ -29,6 +30,7 @@ func NewMockSubscriber(name string, msgType message.MessageType, delay time.Dura
 		StartNewRoundMsgs:  make([]message.Message, 0),
 		ReceivedAnswerMsgs: make([]message.Message, 0),
 		Delay:              delay,
+		wg:                 wg,
 	}
 }
 
@@ -50,6 +52,7 @@ func (ms *MockSubscriber) StartListening() {
 				ms.ReceivedAnswerMsgs = append(ms.ReceivedAnswerMsgs, msg)
 			}
 			ms.mux.Unlock()
+			ms.wg.Done()
 		}
 	}()
 }
