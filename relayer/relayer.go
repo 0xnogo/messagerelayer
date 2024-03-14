@@ -35,7 +35,7 @@ func (mr *MessageRelayer) SubscribeToMessages(msgType message.MessageType, ch ch
 	newSub := subscriber.NewSubscriber(msgType, ch)
 	mr.subscribers = append(mr.subscribers, newSub)
 
-	mr.catchUpSubscriber(&newSub)
+	mr.catchUpSubscriber(newSub)
 }
 
 func (mr *MessageRelayer) Start() {
@@ -44,6 +44,9 @@ func (mr *MessageRelayer) Start() {
 }
 
 func (mr *MessageRelayer) Stop() {
+	mr.mux.Lock()
+	defer mr.mux.Unlock()
+
 	close(mr.stopChannel)
 	close(mr.messageReceived)
 	for _, sub := range mr.subscribers {
@@ -99,13 +102,13 @@ func (mr *MessageRelayer) processMessage() {
 func (mr *MessageRelayer) broadcastMessage(msg *message.Message) {
 	for _, sub := range mr.subscribers {
 		if sub.IsInterestedIn(msg.Type) {
-			mr.sendAndForget(&sub, msg)
+			mr.sendAndForget(sub, msg)
 		}
 	}
 }
 
 // No need to lock here, as this is only called from within a locked block.
-func (mr *MessageRelayer) catchUpSubscriber(sub *subscriber.Subscriber) {
+func (mr *MessageRelayer) catchUpSubscriber(sub subscriber.Subscriber) {
 	for _, msg := range mr.startNewRoundMessages {
 		if msg != nil && sub.IsInterestedIn(msg.Type) {
 			mr.sendAndForget(sub, msg)
@@ -116,7 +119,7 @@ func (mr *MessageRelayer) catchUpSubscriber(sub *subscriber.Subscriber) {
 	}
 }
 
-func (mr *MessageRelayer) sendAndForget(sub *subscriber.Subscriber, msg *message.Message) {
+func (mr *MessageRelayer) sendAndForget(sub subscriber.Subscriber, msg *message.Message) {
 	select {
 	case sub.Ch <- *msg:
 		// Message sent
