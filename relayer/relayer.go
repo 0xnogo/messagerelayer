@@ -67,6 +67,9 @@ func (mr *MessageRelayer) Stop() {
 	for _, sub := range mr.subscribers {
 		close(sub.Ch)
 	}
+	if mr.enableLogging {
+		log.Println("Relayer completely shut down.")
+	}
 }
 
 // Read from the socket and send the message to the processing channel.
