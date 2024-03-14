@@ -4,19 +4,19 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/0xnogo/messagerelayer/buffer"
 	"github.com/0xnogo/messagerelayer/message"
 	"github.com/0xnogo/messagerelayer/socket"
 	"github.com/0xnogo/messagerelayer/subscriber"
 )
 
 type MessageRelayer struct {
-	socket                socket.NetworkSocket
-	subscribers           []subscriber.Subscriber
-	mux                   sync.Mutex
-	startNewRoundMessages [2]*message.Message // Buffer for the 2 most recent StartNewRound messages
-	receivedAnswerMessage *message.Message    // Buffer for the most recent ReceivedAnswer message
-	messageReceived       chan message.Message
-	stopChannel           chan struct{}
+	socket          socket.NetworkSocket
+	subscribers     []subscriber.Subscriber
+	mux             sync.Mutex
+	buffer          *buffer.RelayBuffer
+	messageReceived chan message.Message
+	stopChannel     chan struct{}
 }
 
 func NewMessageRelayer(socket socket.NetworkSocket) *MessageRelayer {
@@ -25,6 +25,7 @@ func NewMessageRelayer(socket socket.NetworkSocket) *MessageRelayer {
 		messageReceived: make(chan message.Message),
 		stopChannel:     make(chan struct{}),
 		subscribers:     make([]subscriber.Subscriber, 0),
+		buffer:          buffer.NewRelayBuffer(),
 	}
 }
 
@@ -54,6 +55,7 @@ func (mr *MessageRelayer) Stop() {
 	}
 }
 
+// Read from the socket and send the message to the processing channel.
 func (mr *MessageRelayer) readFromSocket() {
 	for {
 		select {
@@ -78,22 +80,11 @@ func (mr *MessageRelayer) processMessage() {
 		case <-mr.stopChannel:
 			return
 		case msg := <-mr.messageReceived:
-			func() {
-				mr.mux.Lock()
-				defer mr.mux.Unlock()
+			// RelayBuffer is thread-safe
+			mr.buffer.AddMessage(&msg)
 
-				switch msg.Type {
-				case message.StartNewRound:
-					// Shift and insert to maintain only the 2 most recent messages
-					mr.startNewRoundMessages[0] = mr.startNewRoundMessages[1]
-					mr.startNewRoundMessages[1] = &msg
-				case message.ReceivedAnswer:
-					mr.receivedAnswerMessage = &msg
-				}
-
-				// Broadcast the message right away
-				mr.broadcastMessage(&msg)
-			}()
+			// Broadcast the message right away
+			mr.broadcastMessage(&msg)
 		}
 	}
 }
@@ -102,24 +93,21 @@ func (mr *MessageRelayer) processMessage() {
 func (mr *MessageRelayer) broadcastMessage(msg *message.Message) {
 	for _, sub := range mr.subscribers {
 		if sub.IsInterestedIn(msg.Type) {
-			mr.sendAndForget(sub, msg)
+			mr.sendTo(sub, msg)
 		}
 	}
 }
 
 // No need to lock here, as this is only called from within a locked block.
 func (mr *MessageRelayer) catchUpSubscriber(sub subscriber.Subscriber) {
-	for _, msg := range mr.startNewRoundMessages {
+	mr.buffer.IterateMessages(func(msg *message.Message) {
 		if msg != nil && sub.IsInterestedIn(msg.Type) {
-			mr.sendAndForget(sub, msg)
+			mr.sendTo(sub, msg)
 		}
-	}
-	if mr.receivedAnswerMessage != nil && sub.IsInterestedIn(mr.receivedAnswerMessage.Type) {
-		mr.sendAndForget(sub, mr.receivedAnswerMessage)
-	}
+	})
 }
 
-func (mr *MessageRelayer) sendAndForget(sub subscriber.Subscriber, msg *message.Message) {
+func (mr *MessageRelayer) sendTo(sub subscriber.Subscriber, msg *message.Message) {
 	select {
 	case sub.Ch <- *msg:
 		// Message sent
