@@ -80,15 +80,11 @@ func (mr *MessageRelayer) processMessage() {
 		case <-mr.stopChannel:
 			return
 		case msg := <-mr.messageReceived:
-			func() {
-				mr.mux.Lock()
-				defer mr.mux.Unlock()
+			// RelayBuffer is thread-safe
+			mr.buffer.AddMessage(&msg)
 
-				mr.buffer.AddMessage(&msg)
-
-				// Broadcast the message right away
-				mr.broadcastMessage(&msg)
-			}()
+			// Broadcast the message right away
+			mr.broadcastMessage(&msg)
 		}
 	}
 }
