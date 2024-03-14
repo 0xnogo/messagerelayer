@@ -1,7 +1,7 @@
 package relayer
 
 import (
-	"fmt"
+	"log"
 	"sync"
 
 	"github.com/0xnogo/messagerelayer/buffer"
@@ -17,15 +17,18 @@ type MessageRelayer struct {
 	buffer          *buffer.RelayBuffer
 	messageReceived chan message.Message
 	stopChannel     chan struct{}
+	wg              sync.WaitGroup
+	enableLogging   bool
 }
 
-func NewMessageRelayer(socket socket.NetworkSocket) *MessageRelayer {
+func NewMessageRelayer(socket socket.NetworkSocket, enableLogging bool) *MessageRelayer {
 	return &MessageRelayer{
 		socket:          socket,
 		messageReceived: make(chan message.Message),
 		stopChannel:     make(chan struct{}),
 		subscribers:     make([]subscriber.Subscriber, 0),
 		buffer:          buffer.NewRelayBuffer(),
+		enableLogging:   enableLogging,
 	}
 }
 
@@ -40,15 +43,26 @@ func (mr *MessageRelayer) SubscribeToMessages(msgType message.MessageType, ch ch
 }
 
 func (mr *MessageRelayer) Start() {
+	if mr.enableLogging {
+		log.Println("Starting the relayer...")
+	}
+	mr.wg.Add(2)
+
 	go mr.readFromSocket()
 	go mr.processMessage()
 }
 
 func (mr *MessageRelayer) Stop() {
+	if mr.enableLogging {
+		log.Println("Shutting down gracefully the relayer...")
+	}
 	mr.mux.Lock()
 	defer mr.mux.Unlock()
-
 	close(mr.stopChannel)
+
+	// Wait for the read and process goroutines to finish
+	mr.wg.Wait()
+
 	close(mr.messageReceived)
 	for _, sub := range mr.subscribers {
 		close(sub.Ch)
@@ -57,6 +71,7 @@ func (mr *MessageRelayer) Stop() {
 
 // Read from the socket and send the message to the processing channel.
 func (mr *MessageRelayer) readFromSocket() {
+	defer mr.wg.Done()
 	for {
 		select {
 		case <-mr.stopChannel:
@@ -64,17 +79,30 @@ func (mr *MessageRelayer) readFromSocket() {
 		default:
 			msg, err := mr.socket.Read()
 			if err != nil {
-				// handle error (log)
+				// Potential improvement: max retry count
+				if mr.enableLogging {
+					log.Println("Error reading from socket:", err)
+				}
+
 				continue
 			}
 
-			mr.messageReceived <- msg
+			// Use of select to achieve a graceful shutdown
+			// If the messageReceived channel is full, it will block until it's empty
+			// or until the relayer is stopped
+			select {
+			case mr.messageReceived <- msg:
+			case <-mr.stopChannel:
+				return
+			}
+
 		}
 	}
 }
 
 // Process each incoming message and update the appropriate buffers.
 func (mr *MessageRelayer) processMessage() {
+	defer mr.wg.Done()
 	for {
 		select {
 		case <-mr.stopChannel:
@@ -112,7 +140,9 @@ func (mr *MessageRelayer) sendTo(sub subscriber.Subscriber, msg *message.Message
 	case sub.Ch <- *msg:
 		// Message sent
 	default:
-		fmt.Println("Subscriber is busy")
 		// If the subscriber is busy, we don't want to block the relayer
+		if mr.enableLogging {
+			log.Println("Subscriber is busy")
+		}
 	}
 }
