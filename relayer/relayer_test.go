@@ -26,7 +26,7 @@ type RelayerTestSuite struct {
 
 func (rts *RelayerTestSuite) SetupTest() {
 	rts.mockSocket = new(mockSocket.MockNetworkSocket)
-	rts.relayer = relayer.NewMessageRelayer(rts.mockSocket)
+	rts.relayer = relayer.NewMessageRelayer(rts.mockSocket, false)
 	rts.skipStop = false
 }
 

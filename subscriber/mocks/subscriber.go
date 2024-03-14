@@ -1,7 +1,7 @@
 package mocks
 
 import (
-	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -43,7 +43,7 @@ func (ms *MockSubscriber) Subscribe(relayer *relayer.MessageRelayer) *MockSubscr
 func (ms *MockSubscriber) StartListening() {
 	go func() {
 		for msg := range ms.Ch {
-			fmt.Printf("Subscriber %s - Received message: %s\n", ms.Name, string(msg.Data))
+			log.Printf("Subscriber %s - Received message: %s\n", ms.Name, string(msg.Data))
 			time.Sleep(ms.Delay) // Simulate processing delay
 			ms.mux.Lock()
 			if msg.Type == message.StartNewRound {

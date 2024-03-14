@@ -1,7 +1,7 @@
 package relayer
 
 import (
-	"fmt"
+	"log"
 	"sync"
 
 	"github.com/0xnogo/messagerelayer/buffer"
@@ -18,15 +18,17 @@ type MessageRelayer struct {
 	messageReceived chan message.Message
 	stopChannel     chan struct{}
 	wg              sync.WaitGroup
+	enableLogging   bool
 }
 
-func NewMessageRelayer(socket socket.NetworkSocket) *MessageRelayer {
+func NewMessageRelayer(socket socket.NetworkSocket, enableLogging bool) *MessageRelayer {
 	return &MessageRelayer{
 		socket:          socket,
 		messageReceived: make(chan message.Message),
 		stopChannel:     make(chan struct{}),
 		subscribers:     make([]subscriber.Subscriber, 0),
 		buffer:          buffer.NewRelayBuffer(),
+		enableLogging:   enableLogging,
 	}
 }
 
@@ -41,6 +43,9 @@ func (mr *MessageRelayer) SubscribeToMessages(msgType message.MessageType, ch ch
 }
 
 func (mr *MessageRelayer) Start() {
+	if mr.enableLogging {
+		log.Println("Starting the relayer...")
+	}
 	mr.wg.Add(2)
 
 	go mr.readFromSocket()
@@ -48,7 +53,9 @@ func (mr *MessageRelayer) Start() {
 }
 
 func (mr *MessageRelayer) Stop() {
-	fmt.Println("Shutting down gracefully the relayer...")
+	if mr.enableLogging {
+		log.Println("Shutting down gracefully the relayer...")
+	}
 	mr.mux.Lock()
 	defer mr.mux.Unlock()
 	close(mr.stopChannel)
@@ -72,7 +79,11 @@ func (mr *MessageRelayer) readFromSocket() {
 		default:
 			msg, err := mr.socket.Read()
 			if err != nil {
-				fmt.Println("Error reading from socket:", err)
+				// Potential improvement: max retry count
+				if mr.enableLogging {
+					log.Println("Error reading from socket:", err)
+				}
+
 				continue
 			}
 
@@ -129,7 +140,9 @@ func (mr *MessageRelayer) sendTo(sub subscriber.Subscriber, msg *message.Message
 	case sub.Ch <- *msg:
 		// Message sent
 	default:
-		fmt.Println("Subscriber is busy")
 		// If the subscriber is busy, we don't want to block the relayer
+		if mr.enableLogging {
+			log.Println("Subscriber is busy")
+		}
 	}
 }
