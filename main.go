@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	interactiveMode := flag.Bool("interactive", false, "Run in interactive mode with termbox")
+	interactiveMode := flag.Bool("interactive", false, "Run in interactive mode")
 	flag.Parse()
 
 	if *interactiveMode {
@@ -30,7 +30,7 @@ func runNormalMode() {
 	totalSubscribers := 3
 
 	mockSocket := mocks.NewStaticMockNetworkSocket(totalMessages, 2*time.Second)
-	rel := relayer.NewMessageRelayer(mockSocket, true)
+	rel := relayer.NewMessageRelayer(mockSocket, false)
 
 	// Subscribe users with random interests
 	for i := 0; i < totalSubscribers; i++ {

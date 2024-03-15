@@ -12,10 +12,10 @@ This project simulates a message relaying system where messages are broadcast fr
 
 - Network Socket Listening: The MessageRelayer continuously listens for incoming messages from the network socket in a dedicated goroutine. Upon receiving a new message, it performs two main actions:
  - Channel Dispatch: Immediately sends the received message to a channel that's monitored for broadcasting messages to subscribers.
- - RelayBuffer Update: Updates the RelayBuffer with the new message, ensuring that the buffer maintains only the most relevant messages according to predefined rules.
-- New subscriber are added to the subscriber lists and receive the most recent messages from the RelayBuffer.
+ - RelayerBuffer Update: Updates the RelayerBuffer with the new message, ensuring that the buffer maintains only the most relevant messages according to predefined rules.
+- New subscriber are added to the subscriber lists and receive the most recent messages from the RelayerBuffer.
 
-### RelayBuffer
+### RelayerBuffer
 
 - Manages the storage and prioritization of messages within the MessageRelayer, adhering to memory constraints and ensuring efficient message broadcasting.
 - Stores up to two most recent StartNewRound messages and the most recent ReceivedAnswer message, prioritizing StartNewRound messages when broadcasting.

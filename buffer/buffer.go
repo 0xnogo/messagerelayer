@@ -11,27 +11,27 @@ import (
 // Potential improvement could be to parameterize the buffer size
 // but will involve performance trade-offs.
 
-// RelayBuffer manages the storage and prioritization of messages.
-type RelayBuffer struct {
+// RelayerBuffer manages the storage and prioritization of messages.
+type RelayerBuffer struct {
 	startNewRoundMessages [2]*message.Message // Buffer for the 2 most recent StartNewRound messages
 	receivedAnswerMessage *message.Message    // Buffer for the most recent ReceivedAnswer message
 	mux                   sync.RWMutex
 }
 
-func NewRelayBuffer() *RelayBuffer {
-	return &RelayBuffer{}
+func NewRelayBuffer() *RelayerBuffer {
+	return &RelayerBuffer{}
 }
 
-func (rb *RelayBuffer) StartNewRoundMessages() [2]*message.Message {
+func (rb *RelayerBuffer) StartNewRoundMessages() [2]*message.Message {
 	return rb.startNewRoundMessages
 }
 
-func (rb *RelayBuffer) ReceivedAnswerMessage() *message.Message {
+func (rb *RelayerBuffer) ReceivedAnswerMessage() *message.Message {
 	return rb.receivedAnswerMessage
 }
 
 // AddMessage adds a message to the buffer, following the eviction policy.
-func (rb *RelayBuffer) AddMessage(msg *message.Message) {
+func (rb *RelayerBuffer) AddMessage(msg *message.Message) {
 	rb.mux.Lock()
 	defer rb.mux.Unlock()
 
@@ -46,7 +46,7 @@ func (rb *RelayBuffer) AddMessage(msg *message.Message) {
 
 // IterateMessages calls the given callback function for each message in the buffer,
 // in the correct priority order.
-func (rb *RelayBuffer) IterateMessages(callback func(*message.Message)) {
+func (rb *RelayerBuffer) IterateMessages(callback func(*message.Message)) {
 	rb.mux.RLock()
 	defer rb.mux.RUnlock()
 

@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
+// MockNetworkSocket is used in unit tests
 type MockNetworkSocket struct {
 	mock.Mock
 }
@@ -20,6 +21,7 @@ func (skt *MockNetworkSocket) Read() (message.Message, error) {
 }
 
 // StaticMockNetworkSocket is a mock network socket that sends a fixed number of messages
+// It is used in the normal mode of the application
 type StaticMockNetworkSocket struct {
 	totalMessages        int
 	initialTotalMessages int
@@ -66,6 +68,7 @@ func (m *StaticMockNetworkSocket) Read() (message.Message, error) {
 }
 
 // ChannelMockNetworkSocket is a mock network socket that sends messages from a channel
+// It is used for interactive mode of the application
 type ChannelMockNetworkSocket struct {
 	messages chan message.Message
 }
@@ -85,7 +88,7 @@ func (m *ChannelMockNetworkSocket) Read() (message.Message, error) {
 }
 
 func (m *ChannelMockNetworkSocket) AddMessage(msg message.Message) {
-	m.messages <- msg // Add a message to the channel
+	m.messages <- msg
 }
 
 func (m *ChannelMockNetworkSocket) Close() {

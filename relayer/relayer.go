@@ -14,7 +14,7 @@ type MessageRelayer struct {
 	socket          socket.NetworkSocket
 	subscribers     []subscriber.Subscriber
 	mux             sync.Mutex
-	buffer          *buffer.RelayBuffer
+	buffer          *buffer.RelayerBuffer
 	messageReceived chan message.Message
 	stopChannel     chan struct{}
 	wg              sync.WaitGroup
@@ -129,7 +129,7 @@ func (mr *MessageRelayer) broadcastMessage(msg *message.Message) {
 	}
 }
 
-// No need to lock here, as this is only called from within a locked block.
+// Catch up a new subscriber with the messages already in the buffer.
 func (mr *MessageRelayer) catchUpSubscriber(sub subscriber.Subscriber) {
 	mr.buffer.IterateMessages(func(msg *message.Message) {
 		if msg != nil && sub.IsInterestedIn(msg.Type) {
@@ -138,6 +138,7 @@ func (mr *MessageRelayer) catchUpSubscriber(sub subscriber.Subscriber) {
 	})
 }
 
+// Send the message to the subscriber.
 func (mr *MessageRelayer) sendTo(sub subscriber.Subscriber, msg *message.Message) {
 	select {
 	case sub.Ch <- *msg:
